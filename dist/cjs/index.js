@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.compare = exports.removeExceptionHook = exports.installExceptionHook = exports.unpatchJSON = exports.patchJSON = exports.wrap = void 0;
+exports.getErrorStats = exports.compare = exports.removeExceptionHook = exports.installExceptionHook = exports.unpatchJSON = exports.patchJSON = exports.wrap = void 0;
 exports.init = init;
 const proxy_js_1 = require("./proxy.js");
 const json_js_1 = require("./json.js");
@@ -14,6 +14,7 @@ var core_js_2 = require("./core.js");
 Object.defineProperty(exports, "installExceptionHook", { enumerable: true, get: function () { return core_js_2.installExceptionHook; } });
 Object.defineProperty(exports, "removeExceptionHook", { enumerable: true, get: function () { return core_js_2.removeExceptionHook; } });
 Object.defineProperty(exports, "compare", { enumerable: true, get: function () { return core_js_2.compare; } });
+Object.defineProperty(exports, "getErrorStats", { enumerable: true, get: function () { return core_js_2.getErrorStats; } });
 let initialized = false;
 function init(options) {
     if (initialized)
@@ -25,6 +26,7 @@ function init(options) {
         console.log('[Plester] Self-healing runtime engine activated');
         console.log('[Plester]  + Global exception handler installed');
         console.log('[Plester]  + JSON.parse patched with auto-healer');
+        console.log('[Plester]  + Dual-algorithm matcher (Damerau–Levenshtein + Jaro-Winkler)');
     }
 }
 const plester = { init, wrap: proxy_js_1.wrap };

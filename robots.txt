@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# npm registry SEO — allow full indexing
+Sitemap: https://www.npmjs.com/package/@zetagoaurum-dev/plester

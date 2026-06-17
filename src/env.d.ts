@@ -3,4 +3,5 @@ declare var process: {
   removeAllListeners(event: string): void;
   removeListener(event: string, listener: (...args: any[]) => void): void;
   exit(code?: number): void;
+  stderr: { write(data: string): void };
 };

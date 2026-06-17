@@ -14,10 +14,11 @@ all at runtime, with zero dependencies, and zero overhead.
 <br>
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![npm version](https://img.shields.io/badge/version-1.0.0-1abc9c.svg)](https://www.npmjs.com/package/@zetagoaurum-dev/plester)
+[![npm version](https://img.shields.io/badge/version-1.1.0-1abc9c.svg)](https://www.npmjs.com/package/@zetagoaurum-dev/plester)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/TS-Strict-3178C6.svg)](#)
 [![Dual Module](https://img.shields.io/badge/CJS%20%7C%20ESM%20-ready-f39c12.svg)](#)
+[![Dual Algorithm](https://img.shields.io/badge/matching-DL+JW-9b59b6.svg)](#)
 
 ---
 
@@ -64,11 +65,12 @@ npm install @zetagoaurum-dev/plester
 **Plester** is the runtime band-aid that:
 
 | Fracture | How Plester Heals It |
-|---|---|
-| `user.mame` → `user.name` | Damerau–Levenshtein fuzzy matching (≥1-edit or ≥70% similarity) |
-| `res.sned("Ok")` → `res.send("Ok")` | Transposition-aware method correction |
-| `JSON.parse("{'a':1}")` | Repairs single quotes, missing braces, trailing commas, unquoted keys |
-| `throw new Error("…")` in async code | `uncaughtException` / `unhandledRejection` hook → logged, not crashed |
+|---|---|---|
+| `user.mame` → `user.name` | **Dual-algorithm** matching: Damerau–Levenshtein (edit ops) + Jaro-Winkler (transposition-optimised, prefix-boosted) — picks the best score |
+| `res.sned("Ok")` → `res.send("Ok")` | Jaro-Winkler catches transpositions (`ne`↔`en`) that pure Levenshtein misses |
+| `JSON.parse("{'a':1 /* comment */}")` | Strips JS comments (`//`, `/* */`), converts single quotes, closes unclosed braces, quotes naked keys, normalises `NaN`/`Infinity`/`undefined`→`null`, evaluates hex literals `0xFF` |
+| `throw new Error("…")` 100× in 60s | Circuit breaker suppresses repeat logs after 10 identical errors in 1 minute |
+| `config.db.hst` on a 50-key config object | LRU cache (max 256 entries per object) evicts oldest entries to prevent memory bloat |
 
 And when you **remove** the import?  Every one of those micro-fractures
 surfaces at once — the process dies a cascading death.  *(See the
@@ -129,9 +131,10 @@ plester.init({ silent: true });         // no console.log banners
 │  │  Proxy Typo  │  │  JSON Healer │  │ Exception Guard│  │
 │  │  Corrector   │  │  (dual-pass) │  │ (hooks)        │  │
 │  │              │  │              │  │                │  │
-│  │ WeakMap cache│  │ 1. native    │  │ uncaughtExcept │  │
-│  │ Damerau–Lev  │  │    parse     │  │ unhandledRejec │  │
+│  │ WeakMap cache│  │ 1. native    │  │ circuit breaker│  │
+│  │ DL+JW dual   │  │    parse     │  │ structured log │  │
 │  │ O(1) memoize │  │ 2. heal+retry│  │ (keep alive)   │  │
+│  │ LRU eviction │  │ 3. fallback  │  │ rate tracking  │  │
 │  └──────┬───────┘  └──────┬───────┘  └───────┬────────┘  │
 │         │                 │                   │           │
 │         ▼                 ▼                   ▼           │
@@ -147,32 +150,50 @@ accessed:
 
 1. **Direct check** — if the property exists, return it immediately.
 2. **Cache check** — if we corrected this typo before, answer in O(1).
-3. **Damerau–Levenshtein scan** — compare against every known key
-   (own + prototype), picking the best match.
-4. **Acceptance gate** — distance ≤ 1 **or** normalised similarity ≥ 70%.
+3. **Dual-algorithm scan** — compare against every known key
+   (own + prototype) using **both** Damerau–Levenshtein (edit
+   operations) and Jaro-Winkler (transposition-optimised, prefix-
+   boosted).  The best similarity score wins.
+4. **Acceptance gate** — distance ≤ 1 **or** normalised similarity
+   ≥ 70% **or** Jaro-Winkler ≥ 88%.
 5. **Nested recursion** — if the matched value is an object, wrap it
    lazily (circular-reference-safe via a `WeakMap`).
+6. **LRU eviction** — typo cache capped at 256 entries; oldest
+   entries are evicted first to prevent unbounded memory growth.
 
 ### 2. JSON Healer
 
 `JSON.parse` is monkey-patched with a **dual-pass** strategy:
 
 - **Pass 1** — try native parse.  If it works, zero overhead.
-- **Pass 2** — on `SyntaxError`, tokenise the string char-by-char,
-  repairing:
-  - Single quotes → double quotes
-  - Unquoted identifiers followed by `:` = key → quoted
-  - Trailing commas before `}`/`]` → stripped
-  - Unclosed `{` / `[` / strings → auto-closed
-  - `undefined` → `null`
-- **Fallback** — if healing still fails, throw the **original**
-  `SyntaxError` (no false transparency).
+- **Pass 2** — on `SyntaxError`, pre-process the string:
+  1. **Comment stripping** — removes `//` line comments and `/* */`
+     block comments (string-aware — comments inside strings are
+     preserved).
+  2. **Character-level repair** — tokenises the string char-by-char:
+     - Single quotes (`'`) → double quotes (`"`)
+     - `undefined`, `NaN`, `Infinity` → `null`
+     - Hex literals (`0xFF`, `0xDEAD`) → decimal (`255`, `57005`)
+     - Unquoted identifiers followed by `:` → quoted keys
+     - Trailing commas before `}`/`]` → stripped
+     - Trailing semicolons `;` → stripped
+     - Unclosed `{`, `[`, strings → auto-closed
+- **Pass 3 (fallback)** — if healing still fails, throw the
+  **original** `SyntaxError` (no false transparency).
 
 ### 3. Exception Guard
 
 `process.on('uncaughtException')` and `process.on('unhandledRejection')`
-are hooked to log the error **without calling `process.exit()`**,
-keeping the event loop alive.  Stack traces are preserved for debugging.
+are hooked with three layers of protection:
+
+- **Structured logging** — errors are written to stderr as newline-
+  delimited JSON records with `timestamp`, `level`, `engine`, `name`,
+  `message`, and `frame` for easy ingestion by log aggregators.
+- **Circuit breaker** — if the same error signature (name + stack
+  frame) fires 10+ times within 60 seconds, Plester suppresses
+  redundant logs to prevent log storms.
+- **Keep-alive** — the event loop **never** calls `process.exit()`,
+  even when errors are suppressed by the breaker.
 
 ---
 
@@ -272,20 +293,34 @@ frozen.x = 99;                   // TypeError in strict mode
 ## 🏥 JSON Healer Details
 
 | Input Healed | Correct Output |
-|---|---|
+|---|---|---|
 | `'{"a":1,"b":2'` | `{a:1, b:2}` |
 | `"{'a':1,'b':2}"` | `{a:1, b:2}` |
 | `'{"a":1,"b":2,}'` | `{a:1, b:2}` |
 | `'{a:1,b:2}'` | `{a:1, b:2}` |
 | `'{"a":undefined}'` | `{a: null}` |
 | `'["a","b"'` | `["a","b"]` |
+| `'{"a":1 // comment\n}'` | `{a:1}` |
+| `'{"a":1 /* block */}'` | `{a:1}` |
+| `'{"a":NaN}'` | `{a: null}` |
+| `'{"a":Infinity}'` | `{a: null}` |
+| `'{"a":0xFF}'` | `{a: 255}` |
+| `'{a:{b:{c:1}}}'` | `{a:{b:{c:1}}}` |
+| `'{"a":1;}'` | `{a:1}` |
 
 ---
 
 ## 🛡 Exception Guard Details
 
 - **Does NOT call `process.exit()`** — the event loop stays alive.
-- Logs the error name, message, and the top stack frame to stderr.
+- **Structured JSON logging** — each error is logged to stderr as
+  a newline-delimited JSON object:
+  `{"timestamp":"…","level":"error","engine":"plester","name":"…","message":"…","frame":"…"}`
+- **Circuit breaker** — after 10+ identical errors within 60 seconds,
+  Plester enters "critical" mode and suppresses further logs for that
+  signature to prevent log storms.
+- **Error registry** — accessible via `getErrorStats()` for
+  monitoring & debugging.
 - Handles both `Error` instances and primitive rejection values.
 
 ---
@@ -293,13 +328,14 @@ frozen.x = 99;                   // TypeError in strict mode
 ## ⚡ Performance
 
 | Operation | Complexity | Notes |
-|---|---|---|
-| Direct property hit | O(1) | Reflect.get, no interception |
+|---|---|---|---|
+| Direct property hit | O(1) | `Reflect.get`, no interception |
 | Cache hit (repeated typo) | O(1) | `Map<string, string>` lookup |
-| Fuzzy match (first typo) | O(k·n·m) | k = keys; n,m = string lengths (typ. < 30) |
+| Fuzzy match (first typo) | O(k·(n²+m²)) | k = keys; n,m = string lengths (typ. < 30). Two algorithms run per key, but both use typed arrays (`Uint16Array`, `Uint32Array`) for near-native speed. |
 | `JSON.parse` (valid) | O(n) | Single native parse, zero penalty |
 | `JSON.parse` (heal) | O(n) | Single-pass tokeniser |
 | Exception hook | O(1) | Listeners only, no interception overhead |
+| Circuit breaker | O(1) | `Map<string, ErrorRecord>` lookup per error |
 
 Typical latency for a first-time typo correction on an object with
 10 keys: **< 0.01 ms** (V8 turbofan JIT).
@@ -391,9 +427,9 @@ res.sned("OK");            // memanggil .send("OK")
 
 | Subsistem | Tugas |
 |---|---|
-| **Proxy Typo Corrector** | Saat properti salah eja, Plester membandingkannya dengan semua properti yang ada menggunakan algoritma Damerau–Levenshtein. Jika jarak edit ≤ 1 atau kemiripan ≥ 70%, properti yang benar akan dikembalikan. Hasilnya di-cache untuk akses O(1) berikutnya. |
-| **JSON Healer** | `JSON.parse()` di-*monkey-patch* dengan strategi *dual-pass*: coba *parse* asli dulu; jika gagal karena `SyntaxError`, perbaiki string secara tokenizing: kutip tunggal → ganda, koma berlebih dibuang, kurung tutup yang hilang ditambahkan, *key* tanpa kutip di-quote, `undefined` → `null`. |
-| **Exception Guard** | `process.on('uncaughtException')` dan `'unhandledRejection'` dipasang untuk menangkap error yang tidak tertangani, mencatatnya ke stderr, lalu **tetap melanjutkan** event loop (tidak memanggil `process.exit()`). |
+| **Proxy Typo Corrector** | Dua algoritma sekaligus: Damerau–Levenshtein (operasi edit) + Jaro-Winkler (optimal untuk transposisi/prefix). Skor terbaik yang dipakai. Cache LRU (max 256 entri) mencegah kebocoran memori. |
+| **JSON Healer** | Tiga jalur: (1) parse asli, (2) strip komentar JS + tokenizing — perbaiki kutip tunggal, koma berlebih, kurung tutup hilang, key tanpa kutip, `NaN`/`Infinity`/`undefined` → `null`, heksadesimal `0xFF` → desimal, (3) fallback ke error asli. |
+| **Exception Guard** | Structured JSON logging ke stderr + circuit breaker: jika error yang sama muncul 10× dalam 60 detik, log ditahan agar tidak banjir. Event loop tetap hidup. |
 
 ### 🧪 Contoh Lanjutan
 
@@ -431,6 +467,11 @@ console.log(frozen.xx);          // 1 (typo-read tetap aman)
 | `'{"a":1,"b":2,}'` | `{a:1, b:2}` |
 | `'{a:1,b:2}'` | `{a:1, b:2}` |
 | `'{"a":undefined}'` | `{a: null}` |
+| `'{"a":NaN}'` | `{a: null}` |
+| `'{"a":Infinity}'` | `{a: null}` |
+| `'{"a":0xFF}'` | `{a: 255}` |
+| `'{"a":1 // comment\n}'` | `{a:1}` |
+| `'{a:{b:{c:1}}}'` | `{a:{b:{c:1}}}` |
 
 ### ☠️ Peringatan — *Load-Bearing Dependency*
 

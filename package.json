@@ -1,7 +1,7 @@
 {
   "name": "@zetagoaurum-dev/plester",
-  "version": "1.0.1",
-  "description": "Global Self-Healing & Autocorrect Runtime Engine — transparent typo correction, malformed JSON repair, and silent global exception isolation with zero dependencies.",
+  "version": "1.1.0",
+  "description": "Global Self-Healing & Autocorrect Runtime Engine — transparent typo correction (Damerau–Levenshtein + Jaro-Winkler), malformed JSON repair, and silent global exception isolation with zero dependencies.",
   "keywords": [
     "self-healing",
     "runtime",
@@ -10,9 +10,38 @@
     "autocorrect",
     "zero-dependency",
     "json-healer",
-    "exception-guard"
+    "exception-guard",
+    "damerau-levenshtein",
+    "jaro-winkler",
+    "fuzzy-matching",
+    "runtime-engine",
+    "v8",
+    "nodejs",
+    "bun",
+    "load-bearing",
+    "auto-heal",
+    "crash-prevention",
+    "developer-tools",
+    "debugging"
   ],
   "license": "MIT",
+  "author": "ZetaGo-Aurum (https://github.com/ZetaGo-Aurum)",
+  "homepage": "https://github.com/ZetaGo-Aurum/Plester#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZetaGo-Aurum/Plester.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZetaGo-Aurum/Plester/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/ZetaGo-Aurum"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -43,7 +72,9 @@
   "files": [
     "dist",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "robots.txt"
   ],
   "publishConfig": {
     "access": "public"

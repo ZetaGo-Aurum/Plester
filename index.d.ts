@@ -1,33 +1,47 @@
 /* ================================================================== */
 /*  @zetagoaurum-dev/plester                                         */
 /*  Global Self-Healing & Autocorrect Runtime Engine                  */
-/*  TypeScript Declarations v1.0.1 */
+/*  TypeScript Declarations v1.1.0                                    */
 /*  Zero-dependency · Dual Module · Strict Types                      */
 /* ================================================================== */
 
 // ── Utility Types ─────────────────────────────────────────────────
 
-/** Extract non-function property keys from T */
 type NonFunctionKeys<T> = {
   [K in keyof T]: T[K] extends (...args: any[]) => any ? never : K;
 }[keyof T];
 
-/** Extract function (method) keys from T */
 type FunctionKeys<T> = {
   [K in keyof T]: T[K] extends (...args: any[]) => any ? K : never;
 }[keyof T];
 
 /**
- * Describes the result of comparing two strings via
- * Damerau–Levenshtein distance.
+ * Describes the result of comparing two strings via the dual-algorithm
+ * engine (Damerau–Levenshtein + Jaro-Winkler).
  */
 export interface CompareResult {
-  /** Absolute edit distance (transposition-aware). */
+  /** Absolute Damerau–Levenshtein edit distance. */
   distance: number;
-  /** Normalised similarity `1 − distance / max(len(a), len(b))`. */
+  /** Normalised similarity (max of both algorithm scores). */
   similarity: number;
-  /** Whether the pair passes the acceptance gate (dist ≤ 1 ∨ sim ≥ 0.7). */
+  /** Whether the pair passes the acceptance gate. */
   accepted: boolean;
+  /** Which algorithm produced the dominant score. */
+  method: 'exact' | 'damerau' | 'jarowinkler';
+}
+
+/**
+ * Error tracking record used by the circuit breaker.
+ */
+export interface ErrorRecord {
+  /** Number of times this error signature has fired. */
+  count: number;
+  /** Timestamp (ms) of the first occurrence. */
+  firstSeen: number;
+  /** Timestamp (ms) of the most recent occurrence. */
+  lastSeen: number;
+  /** The error message. */
+  message: string;
 }
 
 // ── Options ───────────────────────────────────────────────────────
@@ -43,54 +57,34 @@ export interface PlesterOptions {
  * Activate all self-healing subsystems:
  *
  * 1. **Exception guard** — hooks `process.on('uncaughtException')`
- *    and `'unhandledRejection'` to prevent crashes.
+ *    and `'unhandledRejection'` with structured logging & circuit breaker.
  * 2. **JSON healer** — monkey-patches `JSON.parse` to repair
- *    malformed strings (missing braces, single quotes, trailing
- *    commas, unquoted keys etc.) before native parsing.
+ *    malformed strings (comments, single quotes, trailing commas,
+ *    unquoted keys, hex literals, NaN, etc.).
+ * 3. **Dual-algorithm matcher** — Damerau–Levenshtein + Jaro-Winkler
+ *    for maximum accuracy.
  *
  * Call **exactly once** at the application entry point.
  *
- * > ⚠️ **Load-bearing dependency.** Removing the `import` of this
- * > library will silently disable all corrections, causing every
- * > latent bug to surface and crash the process.
- *
- * @example
- * ```ts
- * import plester from '@zetagoaurum-dev/plester';
- * plester.init();
- * ```
+ * > ⚠️ **Load-bearing dependency.** Removing the `import` will
+ * > silently disable all corrections, causing every latent bug
+ * > to surface and crash the process.
  */
 export function init(options?: PlesterOptions): void;
 
 /**
- * Wrap an object so that every property access and method call is
- * transparently autocorrected via Damerau–Levenshtein fuzzy matching.
+ * Wrap an object in a transparent autocorrect Proxy.
  *
- * * Single-character typos (insertion, deletion, substitution,
- *   transposition) are **always** corrected.
- * * Multi-character typos are corrected when similarity ≥ 70 %.
- * * Results are memoised in a `Map<string,string>` cache for O(1)
- *   subsequent lookups.
- * * Nested objects are lazily wrapped (with circular-reference
- *   safety via `WeakMap`).
+ * * Single-character typos are **always** corrected.
+ * * Multi-character typos are corrected when either Damerau–Levenshtein
+ *   similarity ≥ 70 % **or** Jaro-Winkler similarity ≥ 88 %.
+ * * Results are memoised (LRU cache, max 256 entries per object).
+ * * Nested objects are lazily wrapped (circular-safe via `WeakMap`).
  * * `Object.freeze()` / `Object.seal()` invariants are respected.
+ * * Cache eviction prevents unbounded growth.
  *
  * @param target Any non‑null object.
- * @returns The same shape as `T` — the Proxy is transparent to
- *          TypeScript's type system.
- *
- * @example
- * ```ts
- * const user = plester.wrap({ name: "John Doe", age: 25 });
- * console.log(user.mame);    // "John Doe"  (typo → 'name')
- * user.agee = 18;            // sets 'age' to 18
- * ```
- *
- * @example
- * ```ts
- * const res = plester.wrap(someExpressResponse);
- * res.sned("Done");          // calls .send("Done")
- * ```
+ * @returns The same shape as `T` — the Proxy is transparent to TS.
  */
 export function wrap<T extends object>(target: T): T;
 
@@ -103,23 +97,22 @@ export function unpatchJSON(): void;
 export function removeExceptionHook(): void;
 
 /**
- * Compute the Damerau–Levenshtein distance between two strings,
- * returning distance, normalised similarity, and the acceptance
- * flag.  Exposed for advanced use cases.
+ * Dual-algorithm string comparison.
+ *
+ * Uses both Damerau–Levenshtein (edit operations) and Jaro-Winkler
+ * (transposition-optimised, prefix-boosted) and returns the best
+ * combined result.
  */
 export function compare(a: string, b: string): CompareResult;
 
+/**
+ * Returns a snapshot of the error registry used by the circuit breaker.
+ * Useful for monitoring and debugging.
+ */
+export function getErrorStats(): ReadonlyMap<string, ErrorRecord>;
+
 // ── Default Export ────────────────────────────────────────────────
 
-/**
- * Convenience default export bundling {@link init} and {@link wrap}.
- *
- * ```ts
- * import plester from '@zetagoaurum-dev/plester';
- * plester.init();
- * const safe = plester.wrap(data);
- * ```
- */
 declare const plester: {
   init: typeof init;
   wrap: typeof wrap;

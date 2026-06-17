@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.wrap = wrap;
 const core_js_1 = require("./core.js");
 const PROXY_CACHE = new WeakMap();
+const MAX_CACHE_SIZE = 256;
 function collectKeys(target) {
     const keys = new Set();
     let proto = target;
@@ -62,6 +63,11 @@ function createProxy(target) {
             }
             const match = findBestMatch(propStr, keys);
             if (match) {
+                if (cache.size >= MAX_CACHE_SIZE) {
+                    const firstKey = cache.keys().next().value;
+                    if (firstKey !== undefined)
+                        cache.delete(firstKey);
+                }
                 cache.set(propStr, match.key);
                 const val = Reflect.get(target, match.key, receiver);
                 if (typeof val === 'function')
@@ -86,6 +92,11 @@ function createProxy(target) {
             }
             const match = findBestMatch(propStr, keys);
             if (match) {
+                if (cache.size >= MAX_CACHE_SIZE) {
+                    const firstKey = cache.keys().next().value;
+                    if (firstKey !== undefined)
+                        cache.delete(firstKey);
+                }
                 cache.set(propStr, match.key);
                 return Reflect.set(target, match.key, value, receiver);
             }

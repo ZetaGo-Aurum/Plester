@@ -3,7 +3,7 @@ import { patchJSON } from './json.js';
 import { installExceptionHook } from './core.js';
 export { wrap } from './proxy.js';
 export { patchJSON, unpatchJSON } from './json.js';
-export { installExceptionHook, removeExceptionHook, compare } from './core.js';
+export { installExceptionHook, removeExceptionHook, compare, getErrorStats } from './core.js';
 let initialized = false;
 export function init(options) {
     if (initialized)
@@ -15,6 +15,7 @@ export function init(options) {
         console.log('[Plester] Self-healing runtime engine activated');
         console.log('[Plester]  + Global exception handler installed');
         console.log('[Plester]  + JSON.parse patched with auto-healer');
+        console.log('[Plester]  + Dual-algorithm matcher (Damerau–Levenshtein + Jaro-Winkler)');
     }
 }
 const plester = { init, wrap };
